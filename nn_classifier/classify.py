@@ -12,13 +12,12 @@ def normalize(t):
     min_value = np.min(t)
     return (t-min_value) / (max_value - min_value)
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('mode', type=str, help='Choose one {train, test / predict}')
     parser.add_argument('--image_path', default=None, type=str, help='Path to image to predict')
     parser.add_argument('--learning_rate', default=0.001, type=int, help='Learning rate for Adam optimizer.')
-    parser.add_argument('--epochs', default=10, type=int, help='Number of epochs to train on.')
+    parser.add_argument('--epochs', default=200, type=int, help='Number of epochs to train on.')
     parser.add_argument('--batch_size', default=256, type=int, help='Batch sizes for training.')
     parser.add_argument('--dropout', default=0.5, type=int, help='Dropout keep prob')
     args = parser.parse_args()
@@ -29,8 +28,8 @@ if __name__ == '__main__':
         #Import data
         x_train = np.reshape(x_train, (x_train.shape[0], -1)) # 50000, 3072
         x_test = np.reshape(x_test, (x_test.shape[0], -1)) # 10000, 3072
-        x_train = x_train / 255
-        x_test = x_test / 255
+        x_train = normalize(x_train)
+        x_test = normalize(x_test)
 
         y_train = np.squeeze(y_train)
         y_test = np.squeeze(y_test)
@@ -44,7 +43,6 @@ if __name__ == '__main__':
 
 
         # Variables
-        #with tf.variable_scope('linear-regression'):
         W1 = tf.get_variable('w1', (3072, 512),
                              initializer=tf.contrib.layers.xavier_initializer())
         W2 = tf.get_variable('w2', (512, 256), 
@@ -71,22 +69,18 @@ if __name__ == '__main__':
         layer_1 = tf.matmul(x, W1) + b1
         layer_1 = tf.layers.batch_normalization(layer_1, momentum=0.9)
         layer_1 = tf.nn.relu(layer_1, name='layer_1')
-        #layer_1 = tf.nn.dropout(layer_1, args.dropout)
 
         layer_2 = tf.matmul(layer_1, W2) + b2
         layer_2 = tf.layers.batch_normalization(layer_2, momentum=0.9)        
         layer_2 = tf.nn.relu(layer_2, name='layer_2')
-        #layer_2 = tf.nn.dropout(layer_2, args.dropout) 
 
         layer_3 = tf.matmul(layer_2, W3) + b3
         layer_3 = tf.layers.batch_normalization(layer_3, momentum=0.9)        
         layer_3 = tf.nn.relu(layer_3, name='layer_3')
-        #layer_3 = tf.nn.dropout(layer_3, args.dropout)
         
         layer_4 = tf.matmul(layer_3, W4) + b4
         layer_4 = tf.layers.batch_normalization(layer_4, momentum=0.9)
         layer_4 = tf.nn.relu(layer_4, name='layer_4')
-        #layer_4 = tf.nn.dropout(layer_4, args.dropout)
 
         y_pred = tf.add(tf.matmul(layer_4, W5),b5, name='y_pred')
 
@@ -103,7 +97,7 @@ if __name__ == '__main__':
             # Val set = x_val
             sess.run(tf.initialize_all_variables())
             print('Loop\t\tTrain Loss\tTrain Acc %\tTest Loss\tTest Acc %')
-            for e in range(500):
+            for e in range(args.epochs):
                 idx_train = np.random.choice(45000, args.batch_size)
                 idx_test = np.random.choice(5000, args.batch_size)
                 X_batch_train, y_batch_train = x_train[idx_train], y_train[idx_train]
@@ -112,8 +106,8 @@ if __name__ == '__main__':
                                                     feed_dict={x: X_batch_train, y_: y_batch_train})
                 _, val_loss, val_acc = sess.run([opt_min, loss, accuracy], 
                                                   feed_dict={x: X_batch_test, y_: y_batch_test})
-                if e % 50 == 0:
-                    print(f'{e}/500\t\t{val_loss:.4f}\t\t{val_acc*100:2.4f}\t\t{train_loss:.4f}\t\t{train_acc*100:2.4f}')
+                if e % (args.epochs/10) == 0:
+                    print(f'{e}/{args.epochs}\t\t{val_loss:.4f}\t\t{val_acc*100:2.4f}\t\t{train_loss:.4f}\t\t{train_acc*100:2.4f}')
 
             # Test trained model
             _, test_loss, test_acc = sess.run([opt_min, loss, accuracy], feed_dict={x: x_test, y_: y_test})
@@ -143,16 +137,10 @@ if __name__ == '__main__':
             
             graph = tf.get_default_graph()
             y_pred = sess.run('y_pred:0', feed_dict={'x:0': img})
-            print(f'y_pred: {y_pred}')
 
             loss = sess.run('loss:0', feed_dict={'y_pred:0': y_pred, 'y_:0': [3]})
-            print(f'loss: {loss}') 
         
             pred = sess.run('prediction:0', feed_dict={'y_pred:0': y_pred, 'y_:0': [3]})
             accuracy = sess.run('accuracy:0', feed_dict={'prediction:0': pred})
             print(f'Class\tLoss\tAcc')
-            print(f'{y_pred.argmax()}\t{loss}\t{accuracy}')
-            
-# prediction = tf.cast(tf.nn.in_top_k(y_pred, y_, 1, name='prediction'), tf.float32)
-#        accuracy = tf.reduce_mean(prediction, name='accuracy')            
-
+            print(f'{y_pred.argmax()}\t{loss:.4f}\t{accuracy*100:2.4f}')
