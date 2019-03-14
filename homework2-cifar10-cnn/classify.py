@@ -17,21 +17,23 @@ if __name__ == '__main__':
     parser.add_argument('mode', type=str, help='Choose one {train, test / predict}')
     parser.add_argument('--image_path', default=None, type=str, help='Path to image to predict')
     parser.add_argument('--learning_rate', default=0.00005, type=int, help='Learning rate for Adam optimizer.')
-    parser.add_argument('--epochs', default=200, type=int, help='Number of epochs to train on.')
+    parser.add_argument('--epochs', default=40, type=int, help='Number of epochs to train on.')
     parser.add_argument('--batch_size', default=256, type=int, help='Batch sizes for training.')
     parser.add_argument('--dropout', default=0.5, type=int, help='Dropout keep prob')
     parser.add_argument('--cnn_stack', default=5, type=int, help='Number of CNN layers to use in model')
-    parser.add_argument('--fc_stack', default=3, type=int, help='Number of FC layers to use in model') 
-    parser.add_argument('--fc1', default=512, type=int, help='Size of first hiddent FC layer')
-    parser.add_argument('--pool_size', default=3, type=int, help='Size of pooling size for max pooling layer')
+    parser.add_argument('--fc_stack', default=4, type=int, help='Number of FC layers to use in model') 
+    parser.add_argument('--fc1', default=128, type=int, help='Size of first hiddent FC layer')
+    parser.add_argument('--pool_size', default=2, type=int, help='Size of pooling size for max pooling layer')
+    parser.add_argument('--lr', default=0.0001, type=float, help='Learning rate for optimizer')
     args = parser.parse_args()
  
     if args.mode.lower() == 'train':    
         (x_train, y_train), (x_test, y_test) = cifar10.load_data()       
 
         #Import data
-        x_train = np.reshape(x_train, (x_train.shape[0], 32, 32, 3)) # 50000, 3072
-        x_test = np.reshape(x_test, (x_test.shape[0], 32, 32, 3)) # 10000, 3072
+        x_train = np.reshape(x_train, (x_train.shape[0], 32, 32, 3)) #.transpose(0,2,3,1) # 50000, 3072
+        x_test = np.reshape(x_test, (x_test.shape[0], 32, 32, 3)) #.transpose(0,2,3,1) # 10000, 3072
+        print('reshaped')
         x_train = normalize(x_train)
         x_test = normalize(x_test)
 
@@ -45,56 +47,60 @@ if __name__ == '__main__':
         x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3), name='x')
         y_ = tf.placeholder(tf.int64, shape=(None), name='y_')
 
-
-        # Variables
-        old_cnn_layer = tf.layers.conv2d(inputs=x, filters=32, kernel_size=5, padding='same')
-        old_cnn_layer = tf.layers.batch_normalization(old_cnn_layer, momentum=0.9)
+        # Convolution layers
+        filters = 32
+        old_cnn_layer = tf.layers.conv2d(inputs=x, filters=filters, kernel_size=5, strides=1, padding='same')
+        old_cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
         old_cnn_layer = tf.nn.relu(old_cnn_layer)
-        #old_cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
-
+        old_cnn_layer = tf.layers.batch_normalization(old_cnn_layer, momentum=0.9)
+        filters = filters * 2
+        
         for _ in range(args.cnn_stack-1):
-            cnn_layer = tf.layers.conv2d(inputs=old_cnn_layer, filters=32, kernel_size=5, padding='same')
-            cnn_layer = tf.layers.batch_normalization(cnn_layer, momentum=0.9)
+            cnn_layer = tf.layers.conv2d(inputs=old_cnn_layer, filters=filters, kernel_size=3, padding='same')
+            cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
             cnn_layer = tf.nn.relu(cnn_layer)
-            #cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
+            cnn_layer = tf.layers.batch_normalization(cnn_layer, momentum=0.9)
+            filters = filters * 2 
             old_cnn_layer = cnn_layer
                  
         cnn_layer = tf.layers.flatten(cnn_layer)
 
-        W = tf.get_variable('w', (32768, args.fc1),
+        # Dense layers
+        fc = args.fc1
+        W = tf.get_variable('w', (32768, fc),
                             initializer=tf.contrib.layers.xavier_initializer()) 
-        b = tf.get_variable('b', (args.fc1,),
+        b = tf.get_variable('b', (fc,),
                             initializer=tf.contrib.layers.xavier_initializer()) 
-
-        fc1 = args.fc1
         old_fc_layer = tf.matmul(cnn_layer, W) + b
         old_fc_layer = tf.layers.batch_normalization(old_fc_layer, momentum=0.9)
         old_fc_layer = tf.nn.relu(old_fc_layer) 
+        #print(old_fc_layer.shape)
 
         if not args.fc_stack:
             fc_layer = old_fc_layer
 
-        for idx in range(args.fc_stack-1):
-            W = tf.get_variable('w'+str(idx+1), (fc1, fc1/2),
+        for idx in range(args.fc_stack-2):
+            W = tf.get_variable('w'+str(idx+1), (fc, fc*2),
                                 initializer=tf.contrib.layers.xavier_initializer())
-            b = tf.get_variable('b'+str(idx+1), (fc1/2,),
+            b = tf.get_variable('b'+str(idx+1), (fc*2,),
                                 initializer=tf.contrib.layers.xavier_initializer())
         
             fc_layer = tf.matmul(old_fc_layer, W) + b
             fc_layer = tf.layers.batch_normalization(fc_layer, momentum=0.9)
             fc_layer = tf.nn.relu(fc_layer)
             old_fc_layer = fc_layer
-            fc1 = fc1/2
-
-        W = tf.get_variable('w'+str(args.fc_stack), (fc1, 10),
+            fc = fc * 2
+            
+        W = tf.get_variable('w'+str(args.fc_stack), (fc, 10),
                             initializer=tf.contrib.layers.xavier_initializer())
         b = tf.get_variable('b'+str(args.fc_stack), (10,),
                             initializer=tf.contrib.layers.xavier_initializer())         
+
         y_pred = tf.add(tf.matmul(fc_layer, W),b, name='y_pred')
 
         loss = tf.reduce_mean(tf.losses.softmax_cross_entropy(tf.one_hot(y_,10),
                                                               logits=y_pred), name='loss')
-        opt_min = tf.train.AdamOptimizer(learning_rate=0.0005, epsilon=0.000001, use_locking=True) \
+        opt_min = tf.train.AdamOptimizer(learning_rate=args.lr, epsilon=0.000001, use_locking=True) \
                           .minimize(loss, name='Adam')
         
         pred = tf.cast(tf.nn.in_top_k(y_pred, y_, 1), tf.float32, name='prediction')
@@ -121,8 +127,8 @@ if __name__ == '__main__':
             print(f'\nFinal Result\tTested Loss\tTested Acc %')
             print(f'\t\t{test_loss:.4f}\t\t{test_acc*100:2.4f}')
     
-            saver = tf.train.Saver()
-            saver.save(sess, 'model/baseline_model')        
+            #saver = tf.train.Saver()
+            #saver.save(sess, 'model/baseline_model')        
             
     
     if args.mode.lower() == 'test' or args.mode.lower() == 'predict':
