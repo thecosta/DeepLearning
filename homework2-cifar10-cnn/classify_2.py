@@ -17,14 +17,14 @@ if __name__ == '__main__':
     parser.add_argument('mode', type=str, help='Choose one {train, test / predict}')
     parser.add_argument('--image_path', default=None, type=str, help='Path to image to predict')
     parser.add_argument('--learning_rate', default=0.00005, type=int, help='Learning rate for Adam optimizer.')
-    parser.add_argument('--epochs', default=40, type=int, help='Number of epochs to train on.')
-    parser.add_argument('--batch_size', default=256, type=int, help='Batch sizes for training.')
+    parser.add_argument('--epochs', default=5, type=int, help='Number of epochs to train on.')
+    parser.add_argument('--batch_size', default=64, type=int, help='Batch sizes for training.')
     parser.add_argument('--dropout', default=0.5, type=int, help='Dropout keep prob')
-    parser.add_argument('--cnn_stack', default=5, type=int, help='Number of CNN layers to use in model')
-    parser.add_argument('--fc_stack', default=1, type=int, help='Number of FC layers to use in model') 
-    parser.add_argument('--fc1', default=128, type=int, help='Size of first hiddent FC layer')
+    parser.add_argument('--cnn_stack', default=7, type=int, help='Number of CNN layers to use in model')
+    parser.add_argument('--fc_stack', default=3, type=int, help='Number of FC layers to use in model') 
+    parser.add_argument('--fc1', default=2048, type=int, help='Size of first hiddent FC layer')
     parser.add_argument('--pool_size', default=2, type=int, help='Size of pooling size for max pooling layer')
-    parser.add_argument('--lr', default=0.0001, type=float, help='Learning rate for optimizer')
+    parser.add_argument('--lr', default=0.00005, type=float, help='Learning rate for optimizer')
     args = parser.parse_args()
  
     if args.mode.lower() == 'train':    
@@ -54,7 +54,7 @@ if __name__ == '__main__':
         old_cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
         old_cnn_layer = tf.nn.elu(old_cnn_layer)
         old_cnn_layer = tf.layers.batch_normalization(old_cnn_layer, momentum=0.9)
-        old_cnn_layer = tf.nn.dropout(old_cnn_layer, keep_prob=dropout_rate)
+        #old_cnn_layer = tf.nn.dropout(old_cnn_layer, keep_prob=dropout_rate)
         dropout_rate = dropout_rate + 0.1
         filters = 3
         #filters = filters * 2
@@ -64,7 +64,7 @@ if __name__ == '__main__':
             cnn_layer = tf.layers.max_pooling2d(old_cnn_layer, pool_size=args.pool_size, strides=1, padding='same')
             cnn_layer = tf.nn.elu(cnn_layer)
             cnn_layer = tf.layers.batch_normalization(cnn_layer, momentum=0.9)
-            old_cnn_layer = tf.nn.dropout(old_cnn_layer, keep_prob=dropout_rate)
+            #old_cnn_layer = tf.nn.dropout(old_cnn_layer, keep_prob=0.2)
             #filters = filters * 2 
             old_cnn_layer = cnn_layer
             dropout_rate = dropout_rate + 0.1
@@ -73,9 +73,9 @@ if __name__ == '__main__':
 
         # Dense layers
         fc = args.fc1
-        W = tf.get_variable('w', (32768, 10),
+        W = tf.get_variable('w', (32768, fc),
                             initializer=tf.contrib.layers.xavier_initializer()) 
-        b = tf.get_variable('b', (10,),
+        b = tf.get_variable('b', (fc,),
                             initializer=tf.contrib.layers.xavier_initializer()) 
         old_fc_layer = tf.matmul(cnn_layer, W) + b
         #old_fc_layer = tf.layers.batch_normalization(old_fc_layer, momentum=0.9)
@@ -120,6 +120,7 @@ if __name__ == '__main__':
         with tf.Session() as sess:
             # Training set = x_test
             # Val set = x_val
+            best = 0
             sess.run(tf.initialize_all_variables())
             print('Loop\t\tTrain Loss\tTrain Acc %\tTest Loss\tTest Acc %')
             for e in range(args.epochs):
@@ -131,7 +132,11 @@ if __name__ == '__main__':
                                                     feed_dict={x: X_batch_train, y_: y_batch_train})
                 _, val_loss, val_acc = sess.run([opt_min, loss, accuracy], 
                                                   feed_dict={x: X_batch_test, y_: y_batch_test})
-                print(f'{e}/{args.epochs}\t\t{val_loss:.4f}\t\t{val_acc*100:2.4f}\t\t{train_loss:.4f}\t\t{train_acc*100:2.4f}')
+                if train_acc > best:
+                    best = train_acc
+                    print(f'{e}/{args.epochs}\t\t{val_loss:.4f}\t\t{val_acc*100:2.4f}\t\t{train_loss:.4f}\t\t{train_acc*100:2.4f}\t<--- Best')
+                else:
+                    print(f'{e}/{args.epochs}\t\t{val_loss:.4f}\t\t{val_acc*100:2.4f}\t\t{train_loss:.4f}\t\t{train_acc*100:2.4f}')
 
             # Test trained model
             _, test_loss, test_acc = sess.run([opt_min, loss, accuracy], feed_dict={x: x_test, y_: y_test})
