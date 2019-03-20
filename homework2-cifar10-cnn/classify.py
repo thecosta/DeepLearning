@@ -171,10 +171,6 @@ if __name__ == '__main__':
         x = tf.placeholder(tf.float32, shape=(None, 32, 32, 3))
         y_ = tf.placeholder(tf.int64, shape=(None))
 
-        #saver = tf.train.import_meta_graph(args.save_model+'.meta')
-        #saver = tf.train.Saver()
-
-        #with tf.device("/cpu:0"):
         graph = tf.get_default_graph()
         with tf.Session(graph=graph) as sess:
             saver = tf.train.import_meta_graph('model/baseline_model.meta')
@@ -183,8 +179,6 @@ if __name__ == '__main__':
             #for op in graph.get_operations():
             #    print(op.name)
             cnn_1 = 'cnn_1/Conv2D:0'
-            #c = graph.get_tensor_by_name('cnn_1/Conv2D:0')
-            #print(sess.run('cnn_1:0'))
             units = sess.run(cnn_1, feed_dict={'x:0': img})
             y_pred = sess.run('y_pred:0', feed_dict={'x:0': img})
             loss = sess.run('loss:0', feed_dict={'y_pred:0': y_pred, 'y_:0': [3]})
@@ -193,9 +187,9 @@ if __name__ == '__main__':
            
             for i in range(32):
                 plt.subplot(6, 6, i+1)
-                #plt.title('Filter '+str(i))
-                plt.imshow(units[0,:,:,i], interpolation="nearest", cmap="gray")
                 plt.axis('off')
+                plt.imshow(units[0,:,:,i], interpolation="nearest", cmap="gray")
+
             plt.savefig('CONV_rslt.png', bbox_inches='tight')
             pred = y_pred.argmax()
             if pred == 0:
