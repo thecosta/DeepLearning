@@ -2,12 +2,13 @@ import os
 import time
 import keras
 import argparse
+import numpy as np
 import tensorflow as tf
 from encoder import Encoder
 from decoder import Decoder
-from preprocess import preprocess
+from preprocess import preprocess, load_dataset
 from bahdanau_attention import BahdanauAttention
-
+from nltk.translate.bleu_score import sentence_bleu
 
 def loss_function(real, pred):
     '''
@@ -23,7 +24,53 @@ def loss_function(real, pred):
     return tf.reduce_mean(loss_)
 
 
-def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, targ_lang):
+def evaluate(sentence):
+    '''
+        From TensorFlow NMT tutorial
+    '''
+    attention_plot = np.zeros((max_length_targ, max_length_inp))
+    sentence = preprocess_sentence(sentence)
+    inputs = [inp_lang.word_index[i] for i in sentence.split(' ')]
+    inputs = tf.keras.preprocessing.sequence.pad_sequences([inputs],
+                                                           maxlen=max_length_inp,
+                                                           padding='post')
+    inputs = tf.convert_to_tensor(inputs)
+
+    result = ''
+    hidden = [tf.zeros((1, units))]
+    enc_out, enc_hidden = encoder(inputs, hidden)
+    dec_hidden = enc_hidden
+    dec_input = tf.expand_dims([targ_lang.word_index['<start>']], 0)
+    for t in range(max_length_targ):
+        predictions, dec_hidden, attention_weights = decoder(dec_input,
+                                                             dec_hidden,
+                                                             enc_out)
+        # storing the attention weights to plot later on
+        attention_weights = tf.reshape(attention_weights, (-1, ))
+        attention_plot[t] = attention_weights.numpy()
+        predicted_id = tf.argmax(predictions[0]).numpy()
+        result += targ_lang.index_word[predicted_id] + ' '
+        if targ_lang.index_word[predicted_id] == '<end>':
+            return result, sentence, attention_plot
+        # the predicted ID is fed back into the model
+        dec_input = tf.expand_dims([predicted_id], 0)
+
+    return result, sentence, attention_plot
+
+
+def translate(sentence):
+    '''
+        From TensorFlow NMT tutorial
+    '''
+    result, sentence, _ = evaluate(sentence)
+    print('Input: %s' % (sentence))
+    print('Predicted translation: {}'.format(result))
+
+    return sentence
+
+
+def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, 
+        inp_lang, targ_lang, fun, translate_sentence, max_length_target, max_length_input):
     BUFFER_SIZE = len(input_tensor_train)
     BATCH_SIZE = 64
     steps_per_epoch = len(input_tensor_train)//BATCH_SIZE
@@ -37,6 +84,8 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
         dataset = dataset.batch(BATCH_SIZE, drop_remainder=True)
         
         example_input_batch, example_target_batch = next(iter(dataset))
+    
+        print (f'Train: {train}')        
 
         # Encoder
         encoder = Encoder(vocab_inp_size, embedding_dim, units, BATCH_SIZE)
@@ -56,7 +105,7 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
         sample_decoder_output, _, _ = decoder(tf.random.uniform((64, 1)),
                                           sample_hidden, sample_output)
         print (f'Decoder output shape: (batch_size, vocab size) {sample_decoder_output.shape}')
-        
+    
         optimizer = tf.train.AdamOptimizer()
         #optimizer = tf.keras.optimizers.Adam()
         #loss_object = tf.keras.metrics.sparse_categorical_crossentropy
@@ -68,30 +117,42 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
                                          encoder=encoder,
                                          decoder=decoder)
         
-        EPOCHS = 10
+        if args.fun == 'train': 
+            EPOCHS = 10
 
-        for epoch in range(EPOCHS):
-            start = time.time()
+            for epoch in range(EPOCHS):
+                start = time.time()
 
-            enc_hidden = encoder.initialize_hidden_state()
-            total_loss = 0
+                enc_hidden = encoder.initialize_hidden_state()
+                total_loss = 0
 
-            for (batch, (inp, targ)) in enumerate(dataset.take(steps_per_epoch)):
-                batch_loss = train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE)
-                total_loss += batch_loss
+                for (batch, (inp, targ)) in enumerate(dataset.take(steps_per_epoch)):
+                    batch_loss = train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE)
+                    total_loss += batch_loss
 
-                if batch % 100 == 0:
-                    print('Epoch {} Batch {} Loss {:.4f}'.format(epoch + 1,
-                                                             batch,
-                                                             batch_loss.numpy()))
-            # saving (checkpoint) the model every 2 epochs
-            if (epoch + 1) % 2 == 0:
-                checkpoint.save(file_prefix = checkpoint_prefix)
+                    if batch % 100 == 0:
+                        print('Epoch {} Batch {} Loss {:.4f}'.format(epoch + 1,
+                                                                 batch,
+                                                                 batch_loss.numpy()))
+                # saving (checkpoint) the model every 2 epochs
+                if (epoch + 1) % 2 == 0:
+                    checkpoint.save(file_prefix = checkpoint_prefix)
 
-            print('Epoch {} Loss {:.4f}'.format(epoch + 1,
-                                              total_loss / steps_per_epoch))
-            print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
+                print('Epoch {} Loss {:.4f}'.format(epoch + 1,
+                                                  total_loss / steps_per_epoch))
+                print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
+    
+        if args.fun == 'test':
+            print('Restoring model..')
+            checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))        
+                        
 
+        if args.fun == 'translate':
+            print('Restoring model..')
+            checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
+            print('Translating..')
+            translate(translate_sentence) 
+    
 
 def train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE):
     '''
@@ -124,6 +185,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str,
                         default='./data/')
     parser.add_argument('--num_examples', type=int, default=30000)
+    parser.add_argument('--fun', type=str, default="train")
+    parser.add_argument('--translate', type=str, default='hello world!')
     parser.add_argument('--id_gpu', type=int, default=-1)
     args = parser.parse_args()
 
@@ -133,5 +196,10 @@ if __name__ == '__main__':
     
     print('Processing and loading data...')
     input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang = preprocess(args.data_path, args.num_examples)
-    
-    #nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang)
+    max_length_targ, max_length_inp = max_length(target_tensor_train), max_length(input_tensor_train)   
+ 
+    with open('./data/translate.txt', 'w') as f:
+        f.write(args.translate) 
+    tensor, lang_tokenizer = load_dataset('./data/translate.txt')
+
+    nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang, args.fun, args.translate, max_length_targ, max_length_inp)
