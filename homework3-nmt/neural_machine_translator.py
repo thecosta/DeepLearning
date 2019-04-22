@@ -6,9 +6,18 @@ import numpy as np
 import tensorflow as tf
 from encoder import Encoder
 from decoder import Decoder
-from preprocess import preprocess, load_dataset
 from bahdanau_attention import BahdanauAttention
-from nltk.translate.bleu_score import sentence_bleu
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from preprocess import preprocess, load_dataset, preprocess_sentence
+
+
+def max_length(tensor):
+    '''
+        From TensorFlow NMT tutorial
+    '''
+    return max(len(t) for t in tensor)
+
+
 
 def loss_function(real, pred):
     '''
@@ -24,7 +33,7 @@ def loss_function(real, pred):
     return tf.reduce_mean(loss_)
 
 
-def evaluate(sentence):
+def evaluate(sentence, inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder):
     '''
         From TensorFlow NMT tutorial
     '''
@@ -37,7 +46,7 @@ def evaluate(sentence):
     inputs = tf.convert_to_tensor(inputs)
 
     result = ''
-    hidden = [tf.zeros((1, units))]
+    hidden = [tf.zeros((1, 1024))]
     enc_out, enc_hidden = encoder(inputs, hidden)
     dec_hidden = enc_hidden
     dec_input = tf.expand_dims([targ_lang.word_index['<start>']], 0)
@@ -70,7 +79,9 @@ def translate(sentence):
 
 
 def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, 
-        inp_lang, targ_lang, fun, translate_sentence, max_length_target, max_length_input):
+        inp_lang, targ_lang, fun, translate_sentence, max_length_target, max_length_input,
+        data_path, num_examples, ckpt):
+
     BUFFER_SIZE = len(input_tensor_train)
     BATCH_SIZE = 64
     steps_per_epoch = len(input_tensor_train)//BATCH_SIZE
@@ -85,8 +96,6 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
         
         example_input_batch, example_target_batch = next(iter(dataset))
     
-        print (f'Train: {train}')        
-
         # Encoder
         encoder = Encoder(vocab_inp_size, embedding_dim, units, BATCH_SIZE)
         sample_hidden = encoder.initialize_hidden_state()
@@ -107,45 +116,60 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
         print (f'Decoder output shape: (batch_size, vocab size) {sample_decoder_output.shape}')
     
         optimizer = tf.train.AdamOptimizer()
-        #optimizer = tf.keras.optimizers.Adam()
-        #loss_object = tf.keras.metrics.sparse_categorical_crossentropy
-        #loss_object = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True, reduction='none')
         
-        checkpoint_dir = './training_checkpoints'
+        checkpoint_dir = ckpt
         checkpoint_prefix = os.path.join(checkpoint_dir, "ckpt")
         checkpoint = tf.train.Checkpoint(optimizer=optimizer,
                                          encoder=encoder,
                                          decoder=decoder)
         
         if args.fun == 'train': 
+            print('Training..')
             EPOCHS = 10
-
             for epoch in range(EPOCHS):
                 start = time.time()
-
                 enc_hidden = encoder.initialize_hidden_state()
                 total_loss = 0
-
                 for (batch, (inp, targ)) in enumerate(dataset.take(steps_per_epoch)):
                     batch_loss = train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE)
                     total_loss += batch_loss
-
-                    if batch % 100 == 0:
-                        print('Epoch {} Batch {} Loss {:.4f}'.format(epoch + 1,
-                                                                 batch,
-                                                                 batch_loss.numpy()))
+                    #if batch % 100 == 0:
+                        #print('Epoch {} Batch {} Loss {:.4f}'.format(epoch + 1,
+                        #                                         batch,
+                        #                                         batch_loss.numpy()))
                 # saving (checkpoint) the model every 2 epochs
                 if (epoch + 1) % 2 == 0:
                     checkpoint.save(file_prefix = checkpoint_prefix)
 
                 print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                                   total_loss / steps_per_epoch))
-                print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
+                #print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
+        print(f'Model saved in file {checkpoint_prefix}')
     
         if args.fun == 'test':
-            print('Restoring model..')
-            checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))        
-                        
+            print('Testing..')
+            checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
+
+            en = []
+            vi = []
+            with open(os.path.join('./data/', 'train.en'), 'r')  as f:
+                for line in f:
+                    en.append(line)
+            with open(os.path.join('./data/', 'train.vi'), 'r')  as f:
+                for line in f:
+                    vi.append(line)         
+            en = en[:100]
+            vi = vi[:100]
+            bleu_scores = []
+            
+            for idx, line in enumerate(en):
+                result, sentence, attention_plot = evaluate(line, inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder)
+                sm = SmoothingFunction()
+                score = sentence_bleu([sentence], vi[idx], smoothing_function=sm.method1)
+                bleu_scores.append(score)
+                print(f'{idx} bleu score: {score}')
+            avg_score = np.average(bleu_scores)
+            print(f'Average BLEU score: {avg_score}')
 
         if args.fun == 'translate':
             print('Restoring model..')
@@ -179,6 +203,7 @@ def train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BA
     optimizer.apply_gradients(zip(gradients, variables))
     return batch_loss
 
+
 if __name__ == '__main__':
     tf.enable_eager_execution()
     parser = argparse.ArgumentParser()
@@ -188,6 +213,7 @@ if __name__ == '__main__':
     parser.add_argument('--fun', type=str, default="train")
     parser.add_argument('--translate', type=str, default='hello world!')
     parser.add_argument('--id_gpu', type=int, default=-1)
+    parser.add_argument('--ckpt', type=str, default='/ckpt')
     args = parser.parse_args()
 
     if args.id_gpu >= 0:
@@ -202,4 +228,4 @@ if __name__ == '__main__':
         f.write(args.translate) 
     tensor, lang_tokenizer = load_dataset('./data/translate.txt')
 
-    nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang, args.fun, args.translate, max_length_targ, max_length_inp)
+    nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang, args.fun, args.translate, max_length_targ, max_length_inp, args.data_path, args.num_examples, args.ckpt)
