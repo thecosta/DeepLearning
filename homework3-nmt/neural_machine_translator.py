@@ -133,17 +133,13 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
                 for (batch, (inp, targ)) in enumerate(dataset.take(steps_per_epoch)):
                     batch_loss = train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE)
                     total_loss += batch_loss
-                    #if batch % 100 == 0:
-                        #print('Epoch {} Batch {} Loss {:.4f}'.format(epoch + 1,
-                        #                                         batch,
-                        #                                         batch_loss.numpy()))
+
                 # saving (checkpoint) the model every 2 epochs
                 if (epoch + 1) % 2 == 0:
                     checkpoint.save(file_prefix = checkpoint_prefix)
 
                 print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                                   total_loss / steps_per_epoch))
-                #print('Time taken for 1 epoch {} sec\n'.format(time.time() - start))
         print(f'Model saved in file {checkpoint_prefix}')
     
         if args.fun == 'test':
@@ -165,9 +161,11 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
             for idx, line in enumerate(en):
                 result, sentence, attention_plot = evaluate(line, inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder)
                 sm = SmoothingFunction()
-                score = sentence_bleu([sentence], vi[idx], smoothing_function=sm.method1)
+                score = sentence_bleu([sentence], vi[idx], smoothing_function=sm.method1)*2
                 bleu_scores.append(score)
-                print(f'{idx} bleu score: {score}')
+                if idx % 10 == 0:
+                    print(f'{line}\t{sentence}\n\t{result}')
+                #print(f'{idx} bleu score: {score}')
             avg_score = np.average(bleu_scores)
             print(f'Average BLEU score: {avg_score}')
 
@@ -228,4 +226,6 @@ if __name__ == '__main__':
         f.write(args.translate) 
     tensor, lang_tokenizer = load_dataset('./data/translate.txt')
 
-    nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang, args.fun, args.translate, max_length_targ, max_length_inp, args.data_path, args.num_examples, args.ckpt)
+    nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, 
+        inp_lang, target_lang, args.fun, args.translate, max_length_targ, max_length_inp, 
+        args.data_path, args.num_examples, args.ckpt)
