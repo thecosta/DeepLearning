@@ -1,9 +1,7 @@
 import os
 import time
-import keras
 import argparse
 import numpy as np
-import tensorflow as tf
 from encoder import Encoder
 from decoder import Decoder
 from bahdanau_attention import BahdanauAttention
@@ -15,6 +13,7 @@ def max_length(tensor):
     '''
         From TensorFlow NMT tutorial
     '''
+    import tensorflow as tf
     return max(len(t) for t in tensor)
 
 
@@ -23,7 +22,7 @@ def loss_function(real, pred):
     '''
         From TensorFlow NMT tutorial
     '''
-    
+    import tensorflow as tf 
     mask = tf.math.logical_not(tf.math.equal(real, 0))
     loss_ = tf.keras.metrics.sparse_categorical_crossentropy(real, pred)
 
@@ -37,6 +36,7 @@ def evaluate(sentence, inp_lang, targ_lang, max_length_targ, max_length_inp, enc
     '''
         From TensorFlow NMT tutorial
     '''
+    import tensorflow as tf
     attention_plot = np.zeros((max_length_targ, max_length_inp))
     sentence = preprocess_sentence(sentence)
     inputs = [inp_lang.word_index[i] for i in sentence.split(' ')]
@@ -67,11 +67,11 @@ def evaluate(sentence, inp_lang, targ_lang, max_length_targ, max_length_inp, enc
     return result, sentence, attention_plot
 
 
-def translate(sentence):
+def translate(sentence, inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder):
     '''
         From TensorFlow NMT tutorial
     '''
-    result, sentence, _ = evaluate(sentence)
+    result, sentence, _ = evaluate(sentence, inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder)
     print('Input: %s' % (sentence))
     print('Predicted translation: {}'.format(result))
 
@@ -81,6 +81,9 @@ def translate(sentence):
 def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, 
         inp_lang, targ_lang, fun, translate_sentence, max_length_target, max_length_input,
         data_path, num_examples, ckpt):
+    import keras
+    import tensorflow as tf
+    tf.enable_eager_execution()
 
     BUFFER_SIZE = len(input_tensor_train)
     BATCH_SIZE = 64
@@ -136,7 +139,7 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
 
                 # saving (checkpoint) the model every 2 epochs
                 if (epoch + 1) % 2 == 0:
-                    checkpoint.save(file_prefix = checkpoint_prefix)
+                    checkpoint.save(file_prefix = '/home/bruno/sp19/DeepLearning/homework3-nmt/ckpt')
 
                 print('Epoch {} Loss {:.4f}'.format(epoch + 1,
                                                   total_loss / steps_per_epoch))
@@ -148,14 +151,14 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
 
             en = []
             vi = []
-            with open(os.path.join('./data/', 'train.en'), 'r')  as f:
+            with open(os.path.join('./data/', 'tst2012.en'), 'r')  as f:
                 for line in f:
                     en.append(line)
-            with open(os.path.join('./data/', 'train.vi'), 'r')  as f:
+            with open(os.path.join('./data/', 'tst2012.vi'), 'r')  as f:
                 for line in f:
                     vi.append(line)         
-            en = en[:100]
-            vi = vi[:100]
+            #en = en[:100]
+            #vi = vi[:100]
             bleu_scores = []
             
             for idx, line in enumerate(en):
@@ -165,7 +168,7 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
                 bleu_scores.append(score)
                 if idx % 10 == 0:
                     print(f'{line}\t{sentence}\n\t{result}')
-                #print(f'{idx} bleu score: {score}')
+                    print(f'{idx} bleu score: {score}\n')
             avg_score = np.average(bleu_scores)
             print(f'Average BLEU score: {avg_score}')
 
@@ -173,14 +176,14 @@ def nmt(input_tensor_train, input_tensor_val, target_tensor_train, target_tensor
             print('Restoring model..')
             checkpoint.restore(tf.train.latest_checkpoint(checkpoint_dir))
             print('Translating..')
-            translate(translate_sentence) 
+            translate(translate_sentence,inp_lang, targ_lang, max_length_targ, max_length_inp, encoder, decoder) 
     
 
 def train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BATCH_SIZE):
     '''
         From TensorFlow NMT tutorial
     '''
-
+    import tensorflow as tf
     loss = 0
     with tf.GradientTape() as tape:
         enc_output, enc_hidden = encoder(inp, enc_hidden)
@@ -203,7 +206,6 @@ def train_step(inp, targ, enc_hidden, encoder, decoder, targ_lang, optimizer, BA
 
 
 if __name__ == '__main__':
-    tf.enable_eager_execution()
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str,
                         default='./data/')
@@ -216,7 +218,7 @@ if __name__ == '__main__':
 
     if args.id_gpu >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ['CUDA_VISIBLE_DEVICES'] = args.id_gpu
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.id_gpu)
     
     print('Processing and loading data...')
     input_tensor_train, input_tensor_val, target_tensor_train, target_tensor_val, inp_lang, target_lang = preprocess(args.data_path, args.num_examples)
